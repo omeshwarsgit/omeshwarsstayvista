@@ -1,0 +1,96 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Property {
+  id                 String          @id @default(uuid())
+  csvId              Int             @unique
+  primaryPropertyId  Int
+  name               String
+  location           String          @default("Lonavala")
+  categoryNormalized String          @default("Villa")
+  basePrice          Float           @default(15000)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  channelLinks       ChannelLink[]
+  priceSnapshots     PriceSnapshot[]
+  parityAudits       ParityAudit[]
+}
+
+model ChannelLink {
+  id              String    @id @default(uuid())
+  propertyId      String
+  channel         String    // SV | AGODA | MMT | BOOKING | AIRBNB
+  url             String
+  linkStatus      String    @default("UNCHECKED") // UNCHECKED | VALID | REDIRECTED | BROKEN | UNREACHABLE
+  repairedUrl     String?
+  lastValidatedAt DateTime?
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+model AuditRun {
+  id                   String          @id @default(uuid())
+  startedAt            DateTime        @default(now())
+  completedAt          DateTime?
+  status               String          // RUNNING | COMPLETED | FAILED
+  triggeredBy          String          @default("MANUAL") // MANUAL | SCHEDULED
+  mode                 String          @default("FULL") // FULL | INCREMENTAL
+  processedCount       Int             @default(0)
+  checkInDate          String          // YYYY-MM-DD
+  checkOutDate         String          // YYYY-MM-DD
+  totalAudited         Int             @default(0)
+  undercutCount        Int             @default(0)
+  parityMatchCount     Int             @default(0)
+  directAdvantageCount Int             @default(0)
+  totalLeakage         Float           @default(0)
+  priceSnapshots       PriceSnapshot[]
+  parityAudits         ParityAudit[]
+}
+
+model PriceSnapshot {
+  id           String   @id @default(uuid())
+  auditRunId   String
+  propertyId   String
+  channel      String   // SV | AGODA | MMT | BOOKING | AIRBNB
+  basePrice    Float
+  taxAmount    Float    @default(0)
+  cleaningFee  Float    @default(0)
+  serviceFee   Float    @default(0)
+  finalPrice   Float
+  currency     String   @default("INR")
+  categoryRaw  String   @default("Villa")
+  availability Boolean  @default(true)
+  scrapeStatus String   @default("OK") // OK | BLOCKED | REDIRECTED | PARSE_ERROR | TIMEOUT
+  scrapedAt    DateTime @default(now())
+
+  auditRun AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+model ParityAudit {
+  id                String   @id @default(uuid())
+  auditRunId        String
+  propertyId        String
+  date              String   // YYYY-MM-DD
+  directPrice       Float
+  agodaPrice        Float
+  mmtPrice          Float
+  bookingPrice      Float
+  airbnbPrice       Float
+  lowestOtaChannel  String   @default("NONE")
+  lowestOtaPrice    Float    @default(0)
+  parityStatus      String   // PARITY_MATCH | OTA_UNDERCUT | DIRECT_ADVANTAGE
+  marginLeakage     Float    @default(0)
+  priceDifference   Float    @default(0)
+  previousStatus    String?
+  statusChanged     Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  auditRun AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
