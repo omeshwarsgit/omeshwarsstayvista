@@ -84,11 +84,64 @@ export async function GET(request: Request) {
       prisma.parityAudit.count({ where }),
     ]);
 
+    // Helper to generate date-prefilled live URLs for 1-click manual verification
+    const nextDay = new Date(date);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const checkOutDateStr = nextDay.toISOString().split('T')[0];
+
+    const buildDateUrl = (channel: string, rawUrl: string) => {
+      if (!rawUrl) return '';
+      try {
+        const ch = channel.toUpperCase();
+        if (ch === 'SV') {
+          const base = rawUrl.split('?')[0];
+          return `${base}?checkin=${date}&checkout=${checkOutDateStr}&adult=2&child=0`;
+        }
+        if (ch === 'AGODA') {
+          const u = new URL(rawUrl);
+          u.searchParams.set('checkIn', date);
+          u.searchParams.set('checkOut', checkOutDateStr);
+          u.searchParams.set('rooms', '1');
+          u.searchParams.set('adults', '2');
+          return u.toString();
+        }
+        if (ch === 'MMT') {
+          const u = new URL(rawUrl);
+          const inParts = date.split('-');
+          const outParts = checkOutDateStr.split('-');
+          if (inParts.length === 3 && outParts.length === 3) {
+            u.searchParams.set('checkin', `${inParts[1]}${inParts[2]}${inParts[0]}`);
+            u.searchParams.set('checkout', `${outParts[1]}${outParts[2]}${outParts[0]}`);
+          }
+          u.searchParams.set('roomStayQualifier', '2e0e');
+          return u.toString();
+        }
+        if (ch === 'BOOKING') {
+          const u = new URL(rawUrl);
+          u.searchParams.set('checkin', date);
+          u.searchParams.set('checkout', checkOutDateStr);
+          u.searchParams.set('group_adults', '2');
+          return u.toString();
+        }
+        if (ch === 'AIRBNB') {
+          const u = new URL(rawUrl);
+          u.searchParams.set('check_in', date);
+          u.searchParams.set('check_out', checkOutDateStr);
+          u.searchParams.set('adults', '2');
+          return u.toString();
+        }
+      } catch {
+        return rawUrl;
+      }
+      return rawUrl;
+    };
+
     // Format output with channel URLs and scrapeStatuses
     const formatted = audits.map((a) => {
       const linksMap: Record<string, string> = {};
       a.property.channelLinks.forEach((l) => {
-        linksMap[l.channel] = l.repairedUrl || l.url;
+        const effectiveUrl = l.repairedUrl || l.url;
+        linksMap[l.channel] = buildDateUrl(l.channel, effectiveUrl);
       });
 
       const channelStatuses: Record<string, string> = {};

@@ -16,9 +16,9 @@ interface StatCardsProps {
 export default function StatCards({ summary }: StatCardsProps) {
   if (!summary) return null;
 
-  const total = summary.totalAudited || 1187;
-  const parityRate = Math.round(((summary.parityMatchCount + summary.directAdvantageCount) / total) * 100);
-  const undercutRate = Math.round((summary.undercutCount / total) * 100);
+  const total = summary.totalAudited || 50;
+  const parityRate = total > 0 ? Math.round(((summary.parityMatchCount + summary.directAdvantageCount) / total) * 100) : 0;
+  const undercutRate = total > 0 ? Math.round((summary.undercutCount / total) * 100) : 0;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">

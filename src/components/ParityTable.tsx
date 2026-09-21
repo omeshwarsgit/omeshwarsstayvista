@@ -69,7 +69,7 @@ export default function ParityTable({
           <input
             type="search"
             aria-label="Search properties by name or location"
-            placeholder="Search 1,187 properties..."
+            placeholder="Search 50 properties..."
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             className="w-full h-8 pl-8 pr-3 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900"
