@@ -71,6 +71,9 @@ export async function GET(request: Request) {
           property: {
             include: {
               channelLinks: true,
+              priceSnapshots: {
+                where: { auditRunId: auditRun.id },
+              },
             },
           },
         },
@@ -81,11 +84,16 @@ export async function GET(request: Request) {
       prisma.parityAudit.count({ where }),
     ]);
 
-    // Format output with channel URLs easily accessible
+    // Format output with channel URLs and scrapeStatuses
     const formatted = audits.map((a) => {
       const linksMap: Record<string, string> = {};
       a.property.channelLinks.forEach((l) => {
         linksMap[l.channel] = l.repairedUrl || l.url;
+      });
+
+      const channelStatuses: Record<string, string> = {};
+      a.property.priceSnapshots?.forEach((ps) => {
+        channelStatuses[ps.channel] = ps.scrapeStatus;
       });
 
       return {
@@ -106,6 +114,7 @@ export async function GET(request: Request) {
         priceDifference: a.priceDifference,
         statusChanged: a.statusChanged,
         links: linksMap,
+        channelStatuses,
       };
     });
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Search, ExternalLink, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { Search, ExternalLink, ChevronLeft, ChevronRight, Eye, AlertTriangle } from 'lucide-react';
 
 interface PropertyItem {
   id: string;
@@ -21,6 +21,7 @@ interface PropertyItem {
   priceDifference: number;
   statusChanged: boolean;
   links: Record<string, string>;
+  channelStatuses?: Record<string, string>;
 }
 
 interface ParityTableProps {
@@ -185,7 +186,14 @@ export default function ParityTable({
 
                     {/* StayVista Direct Baseline */}
                     <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-slate-50 font-mono text-xs">
-                      ₹{item.directPrice.toLocaleString('en-IN')}
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>₹{item.directPrice.toLocaleString('en-IN')}</span>
+                        {(item.channelStatuses?.['SV'] === 'ESTIMATED' || item.channelStatuses?.['SV'] === 'SYNTHETIC') && (
+                          <span title="Estimated baseline price (API fell back to baseline model)" className="text-amber-500 flex-shrink-0 cursor-help" aria-label="Estimated price">
+                            <AlertTriangle className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Agoda: Only highlight in red if it is the lowest causing the undercut */}
@@ -194,7 +202,14 @@ export default function ParityTable({
                         ? 'text-rose-600 font-bold bg-rose-50/40 rounded'
                         : 'text-slate-600'
                     }`}>
-                      {item.agodaPrice > 0 ? `₹${item.agodaPrice.toLocaleString('en-IN')}` : '—'}
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>{item.agodaPrice > 0 ? `₹${item.agodaPrice.toLocaleString('en-IN')}` : '—'}</span>
+                        {(item.channelStatuses?.['AGODA'] === 'ESTIMATED' || item.channelStatuses?.['AGODA'] === 'SYNTHETIC') && item.agodaPrice > 0 && (
+                          <span title="Estimated baseline price (OTA extraction fell back to baseline model)" className="text-amber-500 flex-shrink-0 cursor-help" aria-label="Estimated price">
+                            <AlertTriangle className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* MakeMyTrip */}
@@ -203,7 +218,14 @@ export default function ParityTable({
                         ? 'text-rose-600 font-bold bg-rose-50/40 rounded'
                         : 'text-slate-600'
                     }`}>
-                      {item.mmtPrice > 0 ? `₹${item.mmtPrice.toLocaleString('en-IN')}` : '—'}
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>{item.mmtPrice > 0 ? `₹${item.mmtPrice.toLocaleString('en-IN')}` : '—'}</span>
+                        {(item.channelStatuses?.['MMT'] === 'ESTIMATED' || item.channelStatuses?.['MMT'] === 'SYNTHETIC') && item.mmtPrice > 0 && (
+                          <span title="Estimated baseline price (OTA extraction fell back to baseline model)" className="text-amber-500 flex-shrink-0 cursor-help" aria-label="Estimated price">
+                            <AlertTriangle className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Booking.com */}
@@ -212,7 +234,14 @@ export default function ParityTable({
                         ? 'text-rose-600 font-bold bg-rose-50/40 rounded'
                         : 'text-slate-600'
                     }`}>
-                      {item.bookingPrice > 0 ? `₹${item.bookingPrice.toLocaleString('en-IN')}` : '—'}
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>{item.bookingPrice > 0 ? `₹${item.bookingPrice.toLocaleString('en-IN')}` : '—'}</span>
+                        {(item.channelStatuses?.['BOOKING'] === 'ESTIMATED' || item.channelStatuses?.['BOOKING'] === 'SYNTHETIC') && item.bookingPrice > 0 && (
+                          <span title="Estimated baseline price (OTA extraction fell back to baseline model)" className="text-amber-500 flex-shrink-0 cursor-help" aria-label="Estimated price">
+                            <AlertTriangle className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Airbnb */}
@@ -221,7 +250,14 @@ export default function ParityTable({
                         ? 'text-rose-600 font-bold bg-rose-50/40 rounded'
                         : 'text-slate-600'
                     }`}>
-                      {item.airbnbPrice > 0 ? `₹${item.airbnbPrice.toLocaleString('en-IN')}` : '—'}
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>{item.airbnbPrice > 0 ? `₹${item.airbnbPrice.toLocaleString('en-IN')}` : '—'}</span>
+                        {(item.channelStatuses?.['AIRBNB'] === 'ESTIMATED' || item.channelStatuses?.['AIRBNB'] === 'SYNTHETIC') && item.airbnbPrice > 0 && (
+                          <span title="Estimated baseline price (OTA extraction fell back to baseline model)" className="text-amber-500 flex-shrink-0 cursor-help" aria-label="Estimated price">
+                            <AlertTriangle className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Parity Status Badge with Calmer Alert Styling */}

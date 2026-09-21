@@ -1,16 +1,23 @@
 import { prisma } from '@/lib/prisma';
 import { scrapeStayVistaDirect } from './scrapers/stayvistaScraper';
 import { scrapeAgoda, scrapeMakeMyTrip, scrapeBooking, scrapeAirbnb } from './scrapers/otaScrapers';
-import { calculatePropertyParity, getRegionalCluster } from './parityEngine';
+import { calculatePropertyParity } from './parityEngine';
 import { ChannelScrapeResult } from './scrapers/types';
 import crypto from 'crypto';
 
-interface ActiveJob {
+export const LOCAL_SAFE_CAP = 50;
+
+export interface ActiveJob {
   auditRunId: string;
   isCancelled: boolean;
   processedCount: number;
   totalCount: number;
-  channelStats: Record<string, { ok: number; blocked: number; error: number }>;
+  currentProperty?: {
+    index: number;
+    name: string;
+    location: string;
+  };
+  channelStats: Record<string, { ok: number; estimated: number; blocked: number; error: number }>;
 }
 
 const activeJobs = new Map<string, ActiveJob>();
@@ -46,10 +53,19 @@ export async function startAuditRun(
     whereClause.location = { contains: region };
   }
 
+  // Enforce safe local execution limit capped at safe threshold of 50 properties
+  const safeLimit = Math.min(limit || (mode === 'INCREMENTAL' ? 25 : LOCAL_SAFE_CAP), LOCAL_SAFE_CAP);
+
   const properties = await prisma.property.findMany({
     where: whereClause,
-    take: limit || (mode === 'INCREMENTAL' ? 25 : undefined),
+    take: safeLimit,
     include: { channelLinks: true },
+  });
+
+  // Ensure totalAudited on AuditRun reflects the actual run batch size
+  await prisma.auditRun.update({
+    where: { id: auditRunId },
+    data: { totalAudited: properties.length },
   });
 
   const job: ActiveJob = {
@@ -58,16 +74,16 @@ export async function startAuditRun(
     processedCount: 0,
     totalCount: properties.length,
     channelStats: {
-      SV: { ok: 0, blocked: 0, error: 0 },
-      AGODA: { ok: 0, blocked: 0, error: 0 },
-      MMT: { ok: 0, blocked: 0, error: 0 },
-      BOOKING: { ok: 0, blocked: 0, error: 0 },
-      AIRBNB: { ok: 0, blocked: 0, error: 0 },
+      SV: { ok: 0, estimated: 0, blocked: 0, error: 0 },
+      AGODA: { ok: 0, estimated: 0, blocked: 0, error: 0 },
+      MMT: { ok: 0, estimated: 0, blocked: 0, error: 0 },
+      BOOKING: { ok: 0, estimated: 0, blocked: 0, error: 0 },
+      AIRBNB: { ok: 0, estimated: 0, blocked: 0, error: 0 },
     },
   };
   activeJobs.set(auditRunId, job);
 
-  // Detached execution
+  // Detached asynchronous execution
   (async () => {
     let undercutCount = 0;
     let parityMatchCount = 0;
@@ -75,7 +91,9 @@ export async function startAuditRun(
     let totalLeakage = 0;
 
     try {
-      for (const property of properties) {
+      for (let i = 0; i < properties.length; i++) {
+        const property = properties[i];
+
         if (job.isCancelled) {
           await prisma.auditRun.update({
             where: { id: auditRunId },
@@ -85,6 +103,13 @@ export async function startAuditRun(
           return;
         }
 
+        // Live progress tracking
+        job.currentProperty = {
+          index: i + 1,
+          name: property.name,
+          location: property.location,
+        };
+
         const linksMap: Record<string, string> = {};
         for (const l of property.channelLinks) {
           linksMap[l.channel] = l.repairedUrl || l.url;
@@ -92,7 +117,7 @@ export async function startAuditRun(
 
         const channelResults: Record<string, ChannelScrapeResult> = {};
 
-        // 1. Direct StayVista API (fast path)
+        // 1. Direct StayVista API
         try {
           const svRes = await scrapeStayVistaDirect(
             property.primaryPropertyId,
@@ -113,30 +138,28 @@ export async function startAuditRun(
             currency: 'INR',
             categoryRaw: property.categoryNormalized,
             availability: true,
-            scrapeStatus: 'OK',
+            scrapeStatus: 'ESTIMATED',
           };
-          job.channelStats.SV.ok++;
+          job.channelStats.SV.estimated++;
         }
 
         const directPrice = channelResults['SV']?.finalPrice || property.basePrice;
 
-        // 2. OTA Channels: Agoda, MMT, Booking, Airbnb
-        // Run scrapers or structured rate analysis
+        // 2. OTA Channels: Sequential execution without Promise.all
         const otaList = ['AGODA', 'MMT', 'BOOKING', 'AIRBNB'] as const;
         for (const ota of otaList) {
           const rawUrl = linksMap[ota];
           if (!rawUrl) continue;
 
-          // For fast local execution across many properties, attempt scraper with fallback
           try {
             let otaResult: ChannelScrapeResult | null = null;
-            if (ota === 'AGODA' && job.processedCount < 3) {
+            if (ota === 'AGODA') {
               otaResult = await scrapeAgoda(rawUrl, checkInDate, checkOutDate);
-            } else if (ota === 'MMT' && job.processedCount < 3) {
+            } else if (ota === 'MMT') {
               otaResult = await scrapeMakeMyTrip(rawUrl, checkInDate, checkOutDate);
-            } else if (ota === 'BOOKING' && job.processedCount < 3) {
+            } else if (ota === 'BOOKING') {
               otaResult = await scrapeBooking(rawUrl, checkInDate, checkOutDate);
-            } else if (ota === 'AIRBNB' && job.processedCount < 3) {
+            } else if (ota === 'AIRBNB') {
               otaResult = await scrapeAirbnb(rawUrl, checkInDate, checkOutDate);
             }
 
@@ -144,7 +167,7 @@ export async function startAuditRun(
               channelResults[ota] = otaResult;
               if (otaResult.scrapeStatus === 'OK') job.channelStats[ota].ok++;
             } else {
-              // Graceful rate estimation when headless browser hits bot walls or is skipped for speed
+              // Mark fallback clearly as ESTIMATED to protect data integrity
               const variance = 0.90 + ((property.primaryPropertyId * 17) % 25) / 100;
               const estPrice = Math.round(directPrice * variance);
               channelResults[ota] = {
@@ -155,17 +178,30 @@ export async function startAuditRun(
                 currency: 'INR',
                 categoryRaw: `${property.categoryNormalized} on ${ota}`,
                 availability: true,
-                scrapeStatus: 'OK',
+                scrapeStatus: 'ESTIMATED',
                 scrapedUrl: rawUrl,
               };
-              job.channelStats[ota].ok++;
+              job.channelStats[ota].estimated++;
             }
           } catch {
-            job.channelStats[ota].error++;
+            const variance = 0.90 + ((property.primaryPropertyId * 17) % 25) / 100;
+            const estPrice = Math.round(directPrice * variance);
+            channelResults[ota] = {
+              channel: ota,
+              basePrice: Math.round(estPrice * 0.82),
+              taxAmount: Math.round(estPrice * 0.18),
+              finalPrice: estPrice,
+              currency: 'INR',
+              categoryRaw: `${property.categoryNormalized} on ${ota}`,
+              availability: true,
+              scrapeStatus: 'ESTIMATED',
+              scrapedUrl: rawUrl,
+            };
+            job.channelStats[ota].estimated++;
           }
         }
 
-        // 3. Compute Parity Logic
+        // 3. Compute Parity Logic (standardized on basePrice)
         const parity = await calculatePropertyParity({
           propertyId: property.id,
           directPrice,
@@ -183,7 +219,7 @@ export async function startAuditRun(
           parityMatchCount++;
         }
 
-        // 4. Record Price Snapshots
+        // 4. Record Price Snapshots with compound constraint safety
         const snapshotsData: any[] = [];
         for (const ch of ['SV', 'AGODA', 'MMT', 'BOOKING', 'AIRBNB'] as const) {
           const res = channelResults[ch];
@@ -205,10 +241,25 @@ export async function startAuditRun(
           }
         }
         if (snapshotsData.length > 0) {
-          await prisma.priceSnapshot.createMany({ data: snapshotsData });
+          // Delete prior snapshots for this property in this run if any to ensure idempotency
+          await prisma.priceSnapshot.deleteMany({
+            where: {
+              auditRunId,
+              propertyId: property.id,
+            },
+          });
+          await prisma.priceSnapshot.createMany({
+            data: snapshotsData,
+          });
         }
 
         // 5. Record Parity Audit
+        await prisma.parityAudit.deleteMany({
+          where: {
+            auditRunId,
+            propertyId: property.id,
+          },
+        });
         await prisma.parityAudit.create({
           data: {
             id: crypto.randomUUID(),
@@ -232,18 +283,22 @@ export async function startAuditRun(
 
         job.processedCount++;
 
-        // Batch update progress in DB every 5 properties
-        if (job.processedCount % 5 === 0 || job.processedCount === properties.length) {
-          await prisma.auditRun.update({
-            where: { id: auditRunId },
-            data: {
-              processedCount: job.processedCount,
-              undercutCount,
-              parityMatchCount,
-              directAdvantageCount,
-              totalLeakage,
-            },
-          });
+        // Update progress in DB after each property
+        await prisma.auditRun.update({
+          where: { id: auditRunId },
+          data: {
+            processedCount: job.processedCount,
+            undercutCount,
+            parityMatchCount,
+            directAdvantageCount,
+            totalLeakage,
+          },
+        });
+
+        // 6. Enforce Sequential Pacing: Asynchronous sleep between 6,000ms and 10,000ms
+        if (job.processedCount < properties.length && !job.isCancelled) {
+          const randomJitter = Math.floor(Math.random() * (10000 - 6000 + 1)) + 6000;
+          await new Promise((r) => setTimeout(r, randomJitter));
         }
       }
 
@@ -271,3 +326,4 @@ export async function startAuditRun(
     }
   })();
 }
+

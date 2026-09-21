@@ -42,7 +42,7 @@ export default function ScraperStatusPanel({
       if (statusData?.status !== 'COMPLETED' && statusData?.status !== 'CANCELLED') {
         fetchStatus();
       }
-    }, 2000);
+    }, 3000);
 
     return () => {
       isMounted = false;
@@ -142,6 +142,18 @@ export default function ScraperStatusPanel({
             style={{ width: `${statusData.progressPercent || 0}%` }}
           />
         </div>
+
+        {/* Live Active Property Info */}
+        {isRunning && statusData.currentProperty && (
+          <div className="mt-2.5 px-3 py-1.5 rounded-lg bg-blue-50/70 border border-blue-100 flex items-center justify-between text-xs animate-pulse">
+            <span className="text-slate-600 font-medium">
+              Scraping Property <strong className="text-slate-900">#{statusData.currentProperty.index}</strong> of <strong className="text-slate-900">{statusData.totalAudited || 50}</strong>:
+            </span>
+            <span className="font-semibold text-blue-700 truncate max-w-[280px]">
+              {statusData.currentProperty.name} {statusData.currentProperty.location ? `(${statusData.currentProperty.location})` : ''}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Real-time stats during run */}

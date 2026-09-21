@@ -4,7 +4,7 @@ import React from 'react';
 import { ShieldCheck, RefreshCw, Download, Layers, Calendar as CalendarIcon, Link2 } from 'lucide-react';
 
 interface HeaderProps {
-  selectedDate: string;
+  selectedDate: string | null;
   onRefresh: () => void;
   isRefreshing: boolean;
   onExport: () => void;

@@ -1,4 +1,4 @@
-import { playwrightManager } from './playwrightManager';
+import { playwrightManager, setupPageInterception } from './playwrightManager';
 import { ChannelScrapeResult } from './types';
 import { repairChannelUrl } from '../linkRepair';
 
@@ -27,8 +27,38 @@ function isBlockedPage(title: string, text: string): boolean {
     t.includes('captcha') ||
     t.includes('bot challenge') ||
     t.includes('pardon our interruption') ||
-    t.includes('shieldsquare')
+    t.includes('shieldsquare') ||
+    t.includes('akamai') ||
+    t.includes('perimeterx')
   );
+}
+
+/**
+ * Helper to extract prices via proximity search when standard selectors fail.
+ */
+async function extractPriceViaProximity(page: any): Promise<number> {
+  try {
+    const rawPrice = await page.evaluate(() => {
+      // Look for elements with currency symbols or "Total"
+      const candidates = Array.from(document.querySelectorAll('span, div, p, strong, b'));
+      for (const el of candidates) {
+        const text = el.textContent?.trim() || '';
+        if (text.startsWith('₹') || text.startsWith('INR')) {
+          const match = text.match(/(?:₹|INR)\s*([0-9,]+(?:\.[0-9]{2})?)/i);
+          if (match) {
+            const num = parseFloat(match[1].replace(/,/g, ''));
+            if (num >= 2000 && num <= 500000) {
+              return num;
+            }
+          }
+        }
+      }
+      return 0;
+    });
+    return rawPrice || 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -50,9 +80,15 @@ export async function scrapeAgoda(
     context = await playwrightManager.createStealthContext();
     const page = await context.newPage();
 
-    await page.route('**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}', (route) => route.abort());
+    // Aggressive interception of images, fonts, analytics
+    await setupPageInterception(page);
 
-    const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    try {
+      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 18000 });
+    } catch {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
+
     const finalUrl = page.url();
     const title = await page.title();
     const bodyText = await page.innerText('body').catch(() => '');
@@ -74,7 +110,7 @@ export async function scrapeAgoda(
     }
 
     // Check Bot Block
-    if (isBlockedPage(title, bodyText) || response?.status() === 403 || response?.status() === 429) {
+    if (isBlockedPage(title, bodyText)) {
       return {
         channel: 'AGODA',
         basePrice: 0,
@@ -89,11 +125,13 @@ export async function scrapeAgoda(
       };
     }
 
-    // Price extraction with fallback selectors
+    // Price extraction with standard attributes and proximity
     const priceSelectors = [
       '[data-element-name="final-price"]',
-      '.PriceProperty__Amount',
       '[data-selenium="price-box"]',
+      '[data-testid="price-item-total"]',
+      '[data-element-name="property-price"]',
+      '.PriceProperty__Amount',
       'span[class*="price-box"]',
       'span[class*="final-price"]',
       '.PropertyCard__Price',
@@ -113,7 +151,10 @@ export async function scrapeAgoda(
       }
     }
 
-    // Category extraction
+    if (extractedPrice === 0) {
+      extractedPrice = await extractPriceViaProximity(page);
+    }
+
     let categoryRaw = 'Villa by Vista';
     const categoryEl = await page.$('h1, [data-selenium="hotel-header-name"], .Header__Title');
     if (categoryEl) {
@@ -170,6 +211,8 @@ export async function scrapeAgoda(
 
 /**
  * Scrapes MakeMyTrip property listing with fresh dates.
+ * Akamai Bot Manager blocks standard desktop Playwright on residential IPs;
+ * includes fast detection and graceful early exit to prevent stalling the audit runner.
  */
 export async function scrapeMakeMyTrip(
   rawUrl: string,
@@ -187,9 +230,16 @@ export async function scrapeMakeMyTrip(
     context = await playwrightManager.createStealthContext();
     const page = await context.newPage();
 
-    await page.route('**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}', (route) => route.abort());
+    // Aggressive interception of images, fonts, analytics
+    await setupPageInterception(page);
 
-    const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    // Fast navigation with reduced 12s timeout to prevent hanging on Akamai WAF challenges
+    try {
+      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 12000 });
+    } catch {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
+
     const finalUrl = page.url();
     const title = await page.title();
     const bodyText = await page.innerText('body').catch(() => '');
@@ -210,7 +260,8 @@ export async function scrapeMakeMyTrip(
       };
     }
 
-    if (isBlockedPage(title, bodyText) || response?.status() === 403) {
+    // Akamai WAF Block detection
+    if (isBlockedPage(title, bodyText) || title.includes('Access Denied') || bodyText.includes('Reference #')) {
       return {
         channel: 'MMT',
         basePrice: 0,
@@ -221,18 +272,18 @@ export async function scrapeMakeMyTrip(
         availability: false,
         scrapeStatus: 'BLOCKED',
         scrapedUrl: finalUrl,
-        error: 'Anti-bot challenge encountered',
+        error: 'Akamai WAF challenge encountered on desktop endpoint',
       };
     }
 
     const priceSelectors = [
       '[id*="revamped_price"]',
       '#revamped_price',
+      '[data-testid="room-rate"]',
       'p[class*="priceText"]',
       'span[class*="font28"]',
       '.latoBlack',
       'p.blackText',
-      '[data-testid="room-rate"]',
     ];
 
     let extractedPrice = 0;
@@ -246,6 +297,10 @@ export async function scrapeMakeMyTrip(
           break;
         }
       }
+    }
+
+    if (extractedPrice === 0) {
+      extractedPrice = await extractPriceViaProximity(page);
     }
 
     let categoryRaw = 'StayVista Premium Villa';
@@ -320,9 +375,15 @@ export async function scrapeBooking(
     context = await playwrightManager.createStealthContext();
     const page = await context.newPage();
 
-    await page.route('**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}', (route) => route.abort());
+    // Aggressive interception of images, fonts, analytics
+    await setupPageInterception(page);
 
-    const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    try {
+      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 18000 });
+    } catch {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
+
     const finalUrl = page.url();
     const title = await page.title();
     const bodyText = await page.innerText('body').catch(() => '');
@@ -342,7 +403,7 @@ export async function scrapeBooking(
       };
     }
 
-    if (isBlockedPage(title, bodyText) || response?.status() === 403) {
+    if (isBlockedPage(title, bodyText)) {
       return {
         channel: 'BOOKING',
         basePrice: 0,
@@ -359,6 +420,8 @@ export async function scrapeBooking(
 
     const priceSelectors = [
       '[data-testid="price-and-discounted-price"]',
+      '[data-testid="room-rate"]',
+      '[data-testid="total-price"]',
       '.prco-valign-middle-helper',
       'span[class*="prco_defaultstyle"]',
       '.bui-price-display__value',
@@ -376,6 +439,10 @@ export async function scrapeBooking(
           break;
         }
       }
+    }
+
+    if (extractedPrice === 0) {
+      extractedPrice = await extractPriceViaProximity(page);
     }
 
     if (extractedPrice > 0) {
@@ -442,9 +509,15 @@ export async function scrapeAirbnb(
     context = await playwrightManager.createStealthContext();
     const page = await context.newPage();
 
-    await page.route('**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}', (route) => route.abort());
+    // Aggressive interception of images, fonts, analytics
+    await setupPageInterception(page);
 
-    const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    try {
+      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 18000 });
+    } catch {
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
+
     const finalUrl = page.url();
     const title = await page.title();
     const bodyText = await page.innerText('body').catch(() => '');
@@ -464,7 +537,7 @@ export async function scrapeAirbnb(
       };
     }
 
-    if (isBlockedPage(title, bodyText) || response?.status() === 403) {
+    if (isBlockedPage(title, bodyText)) {
       return {
         channel: 'AIRBNB',
         basePrice: 0,
@@ -479,12 +552,15 @@ export async function scrapeAirbnb(
       };
     }
 
+    // Move away from obfuscated CSS classes to standard data-testids & sidebar locators
     const priceSelectors = [
+      '[data-testid="price-item-total"]',
+      '[data-section-id="BOOK_IT_SIDEBAR"] [data-testid*="price"]',
+      'div[data-testid="book-it-default"] span',
+      'div[data-section-id="BOOK_IT_SIDEBAR"] span[class*="_"]',
       'span[class*="_1y74zjx"]',
       'span[class*="_tyxjp1"]',
-      '[data-testid="price-item-total"]',
       'span._11jcbg2',
-      'div._1jo4hgw',
     ];
 
     let extractedPrice = 0;
@@ -498,6 +574,10 @@ export async function scrapeAirbnb(
           break;
         }
       }
+    }
+
+    if (extractedPrice === 0) {
+      extractedPrice = await extractPriceViaProximity(page);
     }
 
     if (extractedPrice > 0) {
@@ -544,3 +624,4 @@ export async function scrapeAirbnb(
     playwrightManager.releaseDomainSlot(domain);
   }
 }
+

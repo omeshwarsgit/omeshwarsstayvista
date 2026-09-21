@@ -42,6 +42,7 @@ export async function GET(
     totalLeakage: run.totalLeakage,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
+    currentProperty: activeJob?.currentProperty || null,
     channelStats: activeJob?.channelStats || null,
   });
 }

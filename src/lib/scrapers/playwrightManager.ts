@@ -1,8 +1,56 @@
-import { chromium, Browser, BrowserContext } from 'playwright';
+import { chromium } from 'playwright-extra';
+import stealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { Browser, BrowserContext, Page } from 'playwright';
+
+// Initialize Playwright Extra with Stealth Plugin
+chromium.use(stealthPlugin());
+
+const BLOCKED_EXTENSIONS = /\.(png|jpe?g|webp|gif|svg|ico|woff2?|ttf|otf)(\?.*)?$/i;
+const BLOCKED_DOMAINS = [
+  'google-analytics.com',
+  'googletagmanager.com',
+  'doubleclick.net',
+  'facebook.net',
+  'connect.facebook.net',
+  'segment.com',
+  'segment.io',
+  'hotjar.com',
+  'clarity.ms',
+  'criteo.com',
+  'criteo.net',
+  'branch.io',
+  'scorecardresearch.com',
+  'optimizely.com',
+  'mixpanel.com',
+  'bat.bing.com',
+];
+
+/**
+ * Aggressively intercepts requests to abort images, fonts, media, and tracking scripts.
+ * Saves bandwidth, memory, and reduces page load times drastically.
+ */
+export async function setupPageInterception(page: Page): Promise<void> {
+  await page.route('**/*', (route) => {
+    const request = route.request();
+    const url = request.url().toLowerCase();
+    const resourceType = request.resourceType();
+
+    if (
+      resourceType === 'image' ||
+      resourceType === 'media' ||
+      resourceType === 'font' ||
+      BLOCKED_EXTENSIONS.test(url) ||
+      BLOCKED_DOMAINS.some((domain) => url.includes(domain))
+    ) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+}
 
 /**
  * Shared Playwright Browser Manager
- * Manages Chromium instance, stealth contexts, domain-level pacing, and concurrency limits.
+ * Manages Chromium instance, stealth contexts, domain-level pacing, and resource interception.
  */
 class PlaywrightManager {
   private browser: Browser | null = null;
@@ -30,7 +78,7 @@ class PlaywrightManager {
 
     this.isLaunching = true;
     try {
-      this.browser = await chromium.launch({
+      this.browser = (await chromium.launch({
         headless: true,
         args: [
           '--no-sandbox',
@@ -53,7 +101,7 @@ class PlaywrightManager {
           '--disable-renderer-backgrounding',
           '--enable-features=NetworkService,NetworkServiceInProcess',
         ],
-      });
+      })) as unknown as Browser;
       return this.browser;
     } finally {
       this.isLaunching = false;
@@ -74,11 +122,36 @@ class PlaywrightManager {
       },
     });
 
-    // Mask webdriver property
+    // Mask webdriver property and WebGL fingerprint
     await context.addInitScript(() => {
+      // Mask webdriver
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
       });
+
+      // Mask languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-IN', 'en-GB', 'en-US', 'en'],
+      });
+
+      // Mask plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+
+      // Mock WebGL vendor & renderer
+      try {
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function (parameter: number) {
+          if (parameter === 37445) {
+            return 'Intel Inc.';
+          }
+          if (parameter === 37446) {
+            return 'Intel Iris OpenGL Engine';
+          }
+          return getParameter.apply(this, [parameter]);
+        };
+      } catch {}
     });
 
     return context;
@@ -88,7 +161,6 @@ class PlaywrightManager {
    * Paces requests to the same domain to prevent rapid-fire blocking.
    */
   public async waitForDomainSlot(domain: string): Promise<void> {
-    // Wait for slot under concurrency cap
     while ((this.activeRequestsByDomain.get(domain) || 0) >= this.maxConcurrencyPerDomain) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }

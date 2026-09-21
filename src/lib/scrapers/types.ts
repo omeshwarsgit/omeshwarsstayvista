@@ -1,4 +1,4 @@
-export type ScrapeStatus = 'OK' | 'BLOCKED' | 'REDIRECTED' | 'PARSE_ERROR' | 'TIMEOUT';
+export type ScrapeStatus = 'OK' | 'BLOCKED' | 'REDIRECTED' | 'PARSE_ERROR' | 'TIMEOUT' | 'ESTIMATED' | 'SYNTHETIC';
 
 export interface ChannelScrapeResult {
   channel: 'SV' | 'AGODA' | 'MMT' | 'BOOKING' | 'AIRBNB';

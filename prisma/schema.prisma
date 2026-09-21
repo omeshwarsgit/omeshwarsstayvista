@@ -70,6 +70,8 @@ model PriceSnapshot {
 
   auditRun AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([auditRunId, propertyId, channel])
 }
 
 model ParityAudit {

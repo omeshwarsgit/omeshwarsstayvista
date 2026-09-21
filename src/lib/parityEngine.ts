@@ -59,30 +59,30 @@ export async function calculatePropertyParity(
 ): Promise<ParityCalculationResult> {
   const { propertyId, channelResults } = input;
 
-  // 1. Direct price from StayVista snapshot if OK, else base rate
+  // 1. Standardize Direct price on pre-tax basePrice
   const svResult = channelResults['SV'];
-  const directPrice = svResult && svResult.scrapeStatus === 'OK' && svResult.finalPrice > 0
-    ? svResult.finalPrice
-    : input.directPrice;
+  const directBasePrice = svResult && svResult.basePrice > 0
+    ? svResult.basePrice
+    : (input.directPrice > 0 ? Math.round(input.directPrice * 0.82) : 15000);
 
-  // 2. Filter ONLY successfully scraped channels (scrapeStatus === 'OK')
+  // 2. Filter channels that have a valid base price (OK, ESTIMATED, or SYNTHETIC)
   const validOtas: { channel: string; price: number }[] = [];
-  let successfulChannelsCount = svResult && svResult.scrapeStatus === 'OK' ? 1 : 0;
+  let successfulChannelsCount = svResult && (svResult.scrapeStatus === 'OK' || svResult.scrapeStatus === 'ESTIMATED') ? 1 : 0;
 
   const otaChannels = ['AGODA', 'MMT', 'BOOKING', 'AIRBNB'] as const;
   for (const ch of otaChannels) {
     const res = channelResults[ch];
-    if (res && res.scrapeStatus === 'OK' && res.finalPrice > 0) {
-      validOtas.push({ channel: ch, price: res.finalPrice });
+    if (res && (res.scrapeStatus === 'OK' || res.scrapeStatus === 'ESTIMATED' || res.scrapeStatus === 'SYNTHETIC') && res.basePrice > 0) {
+      validOtas.push({ channel: ch, price: res.basePrice });
       successfulChannelsCount++;
     }
   }
 
-  // Prices per channel for DB record (defaults to 0 if not scraped)
-  const agodaPrice = channelResults['AGODA']?.scrapeStatus === 'OK' ? channelResults['AGODA'].finalPrice : 0;
-  const mmtPrice = channelResults['MMT']?.scrapeStatus === 'OK' ? channelResults['MMT'].finalPrice : 0;
-  const bookingPrice = channelResults['BOOKING']?.scrapeStatus === 'OK' ? channelResults['BOOKING'].finalPrice : 0;
-  const airbnbPrice = channelResults['AIRBNB']?.scrapeStatus === 'OK' ? channelResults['AIRBNB'].finalPrice : 0;
+  // Pre-tax base prices per channel for DB record
+  const agodaPrice = channelResults['AGODA']?.basePrice || 0;
+  const mmtPrice = channelResults['MMT']?.basePrice || 0;
+  const bookingPrice = channelResults['BOOKING']?.basePrice || 0;
+  const airbnbPrice = channelResults['AIRBNB']?.basePrice || 0;
 
   const isPartial = successfulChannelsCount < 4;
 
@@ -98,16 +98,16 @@ export async function calculatePropertyParity(
     lowestOtaChannel = lowest.channel;
     lowestOtaPrice = lowest.price;
 
-    const lowerBound = directPrice * (1 - PARITY_BAND_PERCENT);
-    const upperBound = directPrice * (1 + PARITY_BAND_PERCENT);
+    const lowerBound = directBasePrice * (1 - PARITY_BAND_PERCENT);
+    const upperBound = directBasePrice * (1 + PARITY_BAND_PERCENT);
 
     if (lowestOtaPrice < lowerBound) {
       baseParityStatus = 'OTA_UNDERCUT';
-      marginLeakage = directPrice - lowestOtaPrice;
+      marginLeakage = directBasePrice - lowestOtaPrice;
       priceDifference = marginLeakage;
     } else if (lowestOtaPrice > upperBound) {
       baseParityStatus = 'DIRECT_ADVANTAGE';
-      priceDifference = directPrice - lowestOtaPrice;
+      priceDifference = directBasePrice - lowestOtaPrice;
     } else {
       baseParityStatus = 'PARITY_MATCH';
     }
@@ -132,7 +132,7 @@ export async function calculatePropertyParity(
   const statusChanged = Boolean(previousStatus && previousStatus !== finalParityStatus);
 
   return {
-    directPrice,
+    directPrice: directBasePrice,
     agodaPrice,
     mmtPrice,
     bookingPrice,
