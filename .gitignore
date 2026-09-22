@@ -26,6 +26,11 @@ yarn-error.log*
 .env
 .env*.local
 
+# standalone portable runtime & browser cache
+.runtime/
+ms-playwright/
+.local-browsers/
+
 # vercel
 .vercel
 
@@ -37,3 +42,4 @@ prisma/*.db
 prisma/*.db-journal
 *.db
 *.sqlite
+

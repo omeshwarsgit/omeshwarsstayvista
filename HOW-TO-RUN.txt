@@ -1,0 +1,54 @@
+================================================================================
+           STAYVISTA RATE PARITY ENGINE - EASY QUICKSTART GUIDE
+================================================================================
+
+Welcome! You do NOT need any programming knowledge, terminal experience, 
+or administrator/sudo privileges to run this application.
+
+--------------------------------------------------------------------------------
+HOW TO RUN IN 3 EASY STEPS:
+--------------------------------------------------------------------------------
+
+STEP 1: UNZIP
+  If you received this project as a .zip file, extract (unzip) it completely
+  to your Desktop or any folder of your choice.
+
+STEP 2: DOUBLE-CLICK YOUR LAUNCHER
+  - On Windows: Double-click START-WINDOWS.bat
+  - On Mac:     Double-click START-MAC.command
+
+  * What happens automatically behind the scenes:
+    1. Checks for required runtimes (downloads official portable Node.js if missing).
+    2. Installs required application packages and database components.
+    3. Checks and installs the headless browser needed for scraping audits.
+    4. Automatically launches the local server.
+
+STEP 3: USE THE APPLICATION
+  - Your default web browser will automatically open to:
+    http://localhost:3000
+  - You can now run audits, check OTA price parity, and inspect rate discrepancies!
+
+--------------------------------------------------------------------------------
+IMPORTANT TIPS & COMMON QUESTIONS:
+--------------------------------------------------------------------------------
+
+* Keeping the application running:
+  Keep the command/terminal window open while you are using the app.
+  To stop the application when you're done, simply close that window or press Ctrl+C.
+
+* What if the app is already running?
+  If you double-click the launcher while the server is already active, it will 
+  safely detect this and immediately open your browser without conflicting or crashing.
+
+* macOS "Unidentified Developer" or Permission Prompt:
+  If macOS prevents opening on the first try:
+  - Right-click (or Control+click) START-MAC.command and choose "Open", then click "Open" 
+    in the dialog.
+  - Alternatively, open Terminal, type:
+    chmod +x 
+    (add a space, drag START-MAC.command into the terminal window, and press Enter).
+
+* Do I need corporate IT Administrator rights?
+  No. All files, engines, and browser drivers are installed locally inside 
+  the project folder without modifying system settings or requiring admin passwords.
+================================================================================
